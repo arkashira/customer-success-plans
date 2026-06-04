@@ -518,7 +518,7 @@ Acceptance criteria: ship as 'good enough first pass'; open follow-up issue for 
 
 security PASS (findings=0)
 
-## qa — qa @ 2026-06-04T17:24:43.367315Z
+## qa — qa @ 2026-06-04T18:56:01.739710Z
 
 PASS:
 
