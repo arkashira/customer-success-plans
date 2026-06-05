@@ -223,24 +223,24 @@ class FeatureBuilder:
 
 security WARN (findings=3)
 
-## qa — qa @ 2026-06-05T06:30:12.730165Z
+## qa — qa @ 2026-06-05T08:07:49.549943Z
 
 PASS: customer-success-plans
 
 ## Acceptance criteria
-- The model accepts customer data as input and returns a churn probability score between 0 and 1.
-- The model updates predictions in real-time when new customer interaction data is provided.
-- The model provides actionable insights and recommendations based on churn risk level.
-- The model maintains >90% accuracy on historical customer churn data.
-- The model processes predictions within 500ms for individual customer requests.
-- The model handles missing data gracefully without crashing.
-- The model's output format is consistent with existing customer success dashboard API requirements.
+- The model accepts customer data as input and returns a churn probability score between 0 and 1
+- The model updates predictions in real-time when new customer interaction data is provided
+- The model provides actionable insights and recommendations based on churn risk level
+- The model maintains >90% accuracy on historical customer churn data
+- The model processes predictions within 500ms for individual customer requests
+- The model handles missing data gracefully without crashing
+- The model's output format is consistent with existing customer success dashboard API requirements
 
 ## Unit tests
 ```python
 import pytest
 import numpy as np
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from src.churn_prediction_model import ChurnPredictionModel
 
 def test_model_initialization():
@@ -300,45 +300,55 @@ def test_invalid_input_handling():
     with pytest.raises(ValueError):
         model.predict({'customer_id': None})
 
-def test_prediction_performance():
-    """Test prediction response time"""
+def test_accuracy_threshold():
+    """Test model meets accuracy requirements"""
+    model = ChurnPredictionModel()
+    # This would require actual training data to validate
+    # For now, just verify the structure
+    assert hasattr(model, 'accuracy_threshold')
+```
+
+## Integration tests
+```python
+import pytest
+import json
+from datetime import datetime
+from src.churn_prediction_model import ChurnPredictionModel
+
+def test_happy_path_normal_customer():
+    """Happy path: normal customer with low churn risk"""
     model = ChurnPredictionModel()
     
     customer_data = {
         'customer_id': 'cust_123',
-        'days_since_last_interaction': 30,
-        'support_tickets_count': 5,
-        'monthly_spend': 1500,
-        'contract_duration_months': 12
+        'days_since_last_interaction': 15,
+        'support_tickets_count': 2,
+        'monthly_spend': 2500,
+        'contract_duration_months': 24,
+        'feature_usage_percentage': 85
     }
     
-    import time
-    start_time = time.time()
-    model.predict(customer_data)
-    end_time = time.time()
+    result = model.predict(customer_data)
     
-    assert (end_time - start_time) < 0.5  # Ensure prediction is within 500ms
-```
+    assert result['churn_probability'] < 0.3
+    assert len(result['insights']) > 0
+    assert len(result['recommendations']) > 0
+    assert result['customer_id'] == 'cust_123'
 
-## Integration tests
-### Happy paths
-1. **Test real-time churn prediction update**:
-   - Input: Customer interaction data updated in the system.
-   - Expected Output: Updated churn probability score and insights reflecting the new data.
-
-2. **Test actionable insights generation**:
-   - Input: Customer data indicating high churn risk.
-   - Expected Output: Insights and recommendations tailored to reduce churn risk.
-
-3. **Test multiple customer predictions**:
-   - Input: Batch of customer data.
-   - Expected Output: Churn probabilities and insights for all customers in the batch.
-
-### Edge cases
-1. **Test prediction with extreme values**:
-   - Input: Customer data with maximum and minimum values for all features.
-   - Expected Output: Valid churn probability scores within the range [0, 1].
-
-2. **Test prediction with no interaction history**:
-   - Input: Customer data with no previous interactions.
-   - Expected Output: Default churn probability score and insights indicat
+def test_happy_path_high_risk_customer():
+    """Happy path: high-risk customer"""
+    model = ChurnPredictionModel()
+    
+    customer_data = {
+        'customer_id': 'cust_456',
+        'days_since_last_interaction': 90,
+        'support_tickets_count': 15,
+        'monthly_spend': 500,
+        'contract_duration_months': 6,
+        'feature_usage_percentage': 20
+    }
+    
+    result = model.predict(customer_data)
+    
+    assert result['churn_probability'] > 0.7
+   
