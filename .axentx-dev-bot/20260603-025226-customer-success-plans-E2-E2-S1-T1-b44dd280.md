@@ -223,93 +223,122 @@ class FeatureBuilder:
 
 security WARN (findings=3)
 
-## qa — qa @ 2026-06-05T04:27:21.065776Z
+## qa — qa @ 2026-06-05T06:30:12.730165Z
 
 PASS: customer-success-plans
 
-## 1. Acceptance Criteria
-- **Real‑time prediction** – The model must return a churn probability score for any customer within 500 ms of receiving a request.  
-- **Actionable insights** – The output must include a list of at least two actionable recommendations when the churn risk is above a configurable threshold (default 0.6).  
-- **Dynamic updates** – When new interaction data is ingested, the model must immediately recalculate the probability for that customer.  
-- **Accuracy** – On a held‑out test set the model’s AUC‑ROC must be ≥ 0.90.  
-- **Graceful degradation** – Missing or null feature values must be imputed or ignored without raising an exception.  
-- **API contract** – The returned JSON must contain the keys: `customer_id`, `churn_probability`, `insights`, `recommendations`.  
-- **Security** – No sensitive data (e.g., raw customer identifiers) should be logged or exposed in error messages.
+## Acceptance criteria
+- The model accepts customer data as input and returns a churn probability score between 0 and 1.
+- The model updates predictions in real-time when new customer interaction data is provided.
+- The model provides actionable insights and recommendations based on churn risk level.
+- The model maintains >90% accuracy on historical customer churn data.
+- The model processes predictions within 500ms for individual customer requests.
+- The model handles missing data gracefully without crashing.
+- The model's output format is consistent with existing customer success dashboard API requirements.
 
-## 2. Unit Tests (pytest style)
-
+## Unit tests
 ```python
 import pytest
-import time
-from unittest.mock import MagicMock, patch
+import numpy as np
+from unittest.mock import Mock
 from src.churn_prediction_model import ChurnPredictionModel
 
-# ------------------------------------------------------------------
-# Helper fixtures
-# ------------------------------------------------------------------
-@pytest.fixture
-def model():
-    """Instantiate model with a mocked trained estimator."""
-    m = ChurnPredictionModel()
-    # Replace the real estimator with a mock that returns deterministic output
-    m.trained_model = MagicMock()
-    m.trained_model.predict_proba.return_value = [[0.3, 0.7]]  # 70% churn
-    return m
+def test_model_initialization():
+    """Test model initialization with default parameters"""
+    model = ChurnPredictionModel()
+    assert hasattr(model, 'feature_columns')
+    assert hasattr(model, 'trained_model')
 
-# ------------------------------------------------------------------
-# Core functionality
-# ------------------------------------------------------------------
-def test_initialization_defaults():
-    """Model should set default parameters on init."""
-    m = ChurnPredictionModel()
-    assert m.churn_threshold == 0.6
-    assert hasattr(m, 'feature_columns')
-    assert m.trained_model is None  # not yet trained
-
-def test_predict_returns_expected_keys(model):
-    """Predict returns all required keys."""
-    input_data = {
-        'customer_id': 'C123',
-        'days_since_last_interaction': 10,
-        'support_tickets_count': 2,
-        'monthly_spend': 1200,
+def test_predict_single_customer():
+    """Test single customer prediction"""
+    model = ChurnPredictionModel()
+    
+    # Mock trained model
+    mock_model = Mock()
+    mock_model.predict_proba.return_value = [[0.2, 0.8]]
+    model.trained_model = mock_model
+    
+    customer_data = {
+        'customer_id': 'cust_123',
+        'days_since_last_interaction': 30,
+        'support_tickets_count': 5,
+        'monthly_spend': 1500,
         'contract_duration_months': 12
     }
-    result = model.predict(input_data)
-    assert set(result.keys()) == {'customer_id', 'churn_probability', 'insights', 'recommendations'}
+    
+    result = model.predict(customer_data)
+    assert 'churn_probability' in result
     assert 0 <= result['churn_probability'] <= 1
+    assert 'insights' in result
+    assert 'recommendations' in result
 
-def test_insights_and_recommendations_threshold(model):
-    """When churn risk > threshold, insights/recommendations are populated."""
-    input_data = {'customer_id': 'C123', 'days_since_last_interaction': 10,
-                  'support_tickets_count': 2, 'monthly_spend': 1200,
-                  'contract_duration_months': 12}
-    result = model.predict(input_data)
-    assert len(result['insights']) >= 1
-    assert len(result['recommendations']) >= 1
-
-def test_low_risk_no_insights(model):
-    """When churn risk <= threshold, insights/recommendations are empty."""
-    model.trained_model.predict_proba.return_value = [[0.9, 0.1]]  # 10% churn
-    input_data = {'customer_id': 'C123', 'days_since_last_interaction': 10,
-                  'support_tickets_count': 2, 'monthly_spend': 1200,
-                  'contract_duration_months': 12}
-    result = model.predict(input_data)
-    assert result['insights'] == []
-    assert result['recommendations'] == []
-
-def test_missing_features_graceful(model):
-    """Missing optional features are handled without error."""
-    input_data = {
-        'customer_id': 'C123',
-        'days_since_last_interaction': 10,
-        # support_tickets_count missing
-        'monthly_spend': 1200,
+def test_handle_missing_data():
+    """Test handling of missing customer data"""
+    model = ChurnPredictionModel()
+    
+    customer_data = {
+        'customer_id': 'cust_123',
+        'days_since_last_interaction': 30,
+        # Missing support_tickets_count
+        'monthly_spend': 1500,
         'contract_duration_months': 12
     }
-    result = model.predict(input_data)
+    
+    result = model.predict(customer_data)
+    assert 'churn_probability' in result
     assert 0 <= result['churn_probability'] <= 1
 
-def test_invalid_input_raises_value_error(model):
-    """Empty dict or missing customer_id triggers ValueError."""
-    with pytest.rai
+def test_invalid_input_handling():
+    """Test handling of invalid customer data"""
+    model = ChurnPredictionModel()
+    
+    # Empty data
+    with pytest.raises(ValueError):
+        model.predict({})
+    
+    # Invalid customer_id
+    with pytest.raises(ValueError):
+        model.predict({'customer_id': None})
+
+def test_prediction_performance():
+    """Test prediction response time"""
+    model = ChurnPredictionModel()
+    
+    customer_data = {
+        'customer_id': 'cust_123',
+        'days_since_last_interaction': 30,
+        'support_tickets_count': 5,
+        'monthly_spend': 1500,
+        'contract_duration_months': 12
+    }
+    
+    import time
+    start_time = time.time()
+    model.predict(customer_data)
+    end_time = time.time()
+    
+    assert (end_time - start_time) < 0.5  # Ensure prediction is within 500ms
+```
+
+## Integration tests
+### Happy paths
+1. **Test real-time churn prediction update**:
+   - Input: Customer interaction data updated in the system.
+   - Expected Output: Updated churn probability score and insights reflecting the new data.
+
+2. **Test actionable insights generation**:
+   - Input: Customer data indicating high churn risk.
+   - Expected Output: Insights and recommendations tailored to reduce churn risk.
+
+3. **Test multiple customer predictions**:
+   - Input: Batch of customer data.
+   - Expected Output: Churn probabilities and insights for all customers in the batch.
+
+### Edge cases
+1. **Test prediction with extreme values**:
+   - Input: Customer data with maximum and minimum values for all features.
+   - Expected Output: Valid churn probability scores within the range [0, 1].
+
+2. **Test prediction with no interaction history**:
+   - Input: Customer data with no previous interactions.
+   - Expected Output: Default churn probability score and insights indicat
