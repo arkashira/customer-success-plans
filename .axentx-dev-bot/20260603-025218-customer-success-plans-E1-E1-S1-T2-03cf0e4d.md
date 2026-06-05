@@ -108,87 +108,104 @@ APPROVE (verifier-coached, 2 refine round(s)).
 
 security PASS (findings=0)
 
-## qa — qa @ 2026-06-04T22:12:06.765142Z
+## qa — qa @ 2026-06-04T23:13:29.070152Z
 
-PASS:  
+**PASS:** TDD test plan for AI-driven success plan generation algorithm
 
----
+## Acceptance Criteria
 
-## 1. Acceptance Criteria
-1. **Unique Plan Generation** – For any given customer ID, the API returns a success plan whose `plan_id` is globally unique and differs from plans generated for any other customer ID.  
-2. **Profile‑Driven Content** – The plan’s recommendations list must contain at least one item that directly reflects a non‑default attribute from the customer’s profile (e.g., industry, product tier, recent usage pattern).  
-3. **Actionable Tasks** – Each recommendation includes a `task` object with `title`, `description`, `owner` (CSM ID), and a future `due_date` (ISO‑8601) that is ≤ 30 days from generation time.  
-4. **Real‑Time Updates** – When a customer interaction event (e.g., “login”, “support_ticket”, “feature_use”) is posted to the system, the existing plan for that customer is automatically updated within 5 seconds, and the `last_updated` timestamp reflects the change.  
-5. **Idempotent Retrieval** – Re‑requesting the plan for the same customer without new events returns the identical plan object (same `plan_id` and content).  
-6. **Performance** – Generation of a new plan for a customer with a full profile (≤ 200 attributes) completes in ≤ 150 ms on the production environment.  
-7. **Audit Trail** – Every generation and update writes an audit record containing `plan_id`, `customer_id`, `operation` (“create”/“update”), `timestamp`, and a hash of the plan payload.
+1. The system generates a unique success plan for each customer based on their profile and behavior.
+	* Criteria: Success plan is unique for each customer.
+	* Measure: Compare generated success plans for different customers.
+2. The success plan includes actionable recommendations and tasks for the customer success team.
+	* Criteria: Success plan contains actionable recommendations and tasks.
+	* Measure: Inspect generated success plan for presence of actionable items.
+3. The system tracks and updates the success plan in real-time based on customer interactions and behavior.
+	* Criteria: Success plan is updated in real-time.
+	* Measure: Observe changes to success plan after simulating customer interactions.
 
----
-
-## 2. Unit Tests (pytest style)
+## Unit Tests
 
 ```python
-import pytest
-from datetime import datetime, timedelta
-from success_plan_generation import (
-    generate_success_plan,
-    handle_customer_event,
-    get_success_plan,
-    _audit_log,   # internal helper
-)
+import unittest
+from unittest.mock import patch
+from success_plan_generation import generate_success_plan
 
-@pytest.fixture
-def sample_profile():
-    return {
-        "customer_id": "cust_123",
-        "industry": "FinTech",
-        "tier": "Enterprise",
-        "usage_last_30d": {"login": 45, "feature_x": 12},
-        # ... other attributes ...
-    }
+class TestSuccessPlanGeneration(unittest.TestCase):
+    @patch('customer_profile_service.get_customer_profile')
+    def test_generate_success_plan(self, mock_get_customer_profile):
+        # Arrange
+        customer_id = 'customer-123'
+        mock_get_customer_profile.return_value = {'profile': 'example-profile', 'behavior': 'example-behavior'}
+        
+        # Act
+        success_plan = generate_success_plan(customer_id)
+        
+        # Assert
+        self.assertIsNotNone(success_plan)
+        self.assertIn('actionable_recommendations', success_plan)
+        self.assertIn('tasks', success_plan)
 
-def test_generate_unique_plan_id(sample_profile):
-    plan1 = generate_success_plan(sample_profile)
-    plan2 = generate_success_plan(sample_profile)  # second call simulates another customer
-    assert plan1["plan_id"] != plan2["plan_id"]
-    assert isinstance(plan1["plan_id"], str)
+    @patch('customer_profile_service.get_customer_profile')
+    def test_generate_success_plan_unique(self, mock_get_customer_profile):
+        # Arrange
+        customer_id1 = 'customer-123'
+        customer_id2 = 'customer-456'
+        mock_get_customer_profile.side_effect = [
+            {'profile': 'example-profile1', 'behavior': 'example-behavior1'},
+            {'profile': 'example-profile2', 'behavior': 'example-behavior2'}
+        ]
+        
+        # Act
+        success_plan1 = generate_success_plan(customer_id1)
+        success_plan2 = generate_success_plan(customer_id2)
+        
+        # Assert
+        self.assertNotEqual(success_plan1, success_plan2)
 
-def test_plan_reflects_profile_attribute(sample_profile):
-    plan = generate_success_plan(sample_profile)
-    # Expect at least one recommendation mentioning the industry
-    assert any("FinTech" in rec["title"] or "FinTech" in rec["description"]
-               for rec in plan["recommendations"])
+if __name__ == '__main__':
+    unittest.main()
+```
 
-def test_tasks_have_valid_due_dates(sample_profile):
-    plan = generate_success_plan(sample_profile)
-    now = datetime.utcnow()
-    for rec in plan["recommendations"]:
-        task = rec["task"]
-        due = datetime.fromisoformat(task["due_date"])
-        assert now < due <= now + timedelta(days=30)
+## Integration Tests
 
-def test_audit_log_created_on_generation(sample_profile):
-    _audit_log.clear()
-    plan = generate_success_plan(sample_profile)
-    assert len(_audit_log) == 1
-    entry = _audit_log[0]
-    assert entry["operation"] == "create"
-    assert entry["plan_id"] == plan["plan_id"]
-    assert entry["customer_id"] == sample_profile["customer_id"]
+```python
+import unittest
+from unittest.mock import patch
+from success_plan_generation import generate_success_plan
+from customer_profile_service import get_customer_profile
+from customer_interaction_service import update_customer_interaction
 
-def test_real_time_update_on_event(sample_profile):
-    plan = generate_success_plan(sample_profile)
-    original_last_updated = plan["last_updated"]
-    # Simulate an event that should trigger an update
-    event = {"customer_id": sample_profile["customer_id"], "type": "login", "timestamp": datetime.utcnow().isoformat()}
-    handle_customer_event(event)
-    updated_plan = get_success_plan(sample_profile["customer_id"])
-    assert updated_plan["last_updated"] > original_last_updated
-    # Ensure at least one recommendation changed (simple hash diff)
-    assert updated_plan["plan_hash"] != plan["plan_hash"]
+class TestSuccessPlanGenerationIntegration(unittest.TestCase):
+    def test_generate_success_plan_real_time_update(self):
+        # Arrange
+        customer_id = 'customer-123'
+        customer_profile = {'profile': 'example-profile', 'behavior': 'example-behavior'}
+        get_customer_profile.return_value = customer_profile
+        
+        # Act
+        success_plan = generate_success_plan(customer_id)
+        update_customer_interaction(customer_id, 'example-interaction')
+        
+        # Assert
+        self.assertIn('updated_success_plan', success_plan)
+        self.assertEqual(success_plan['updated_success_plan'], 'example-updated-success-plan')
 
-def test_idempotent_retrieval(sample_profile):
-    generate_success_plan(sample_profile)
-    plan_a = get_success_plan(sample_profile["customer_id"])
-    plan_b = get_success_plan(sample_profile["customer_id"])
-    assert plan
+    def test_generate_success_plan_real_time_update_multiple_interactions(self):
+        # Arrange
+        customer_id = 'customer-123'
+        customer_profile = {'profile': 'example-profile', 'behavior': 'example-behavior'}
+        get_customer_profile.return_value = customer_profile
+        
+        # Act
+        success_plan = generate_success_plan(customer_id)
+        update_customer_interaction(customer_id, 'example-interaction1')
+        update_customer_interaction(customer_id, 'example-interaction2')
+        
+        # Assert
+        self.assertIn('updated_success_plan', success_plan)
+        self.assertEqual(success_plan['updated_success_plan'], 'example-updated-success-plan2')
+
+    def test_generate_success_plan_real_time_update_edge_case(self):
+        # Arrange
+       
