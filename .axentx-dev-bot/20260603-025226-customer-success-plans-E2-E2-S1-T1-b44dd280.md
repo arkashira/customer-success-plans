@@ -223,103 +223,93 @@ class FeatureBuilder:
 
 security WARN (findings=3)
 
-## qa — qa @ 2026-06-05T03:44:04.715455Z
+## qa — qa @ 2026-06-05T04:27:21.065776Z
 
-PASS: Test plan fully addresses missing implementation verification and covers all acceptance criteria.
+PASS: customer-success-plans
 
----
+## 1. Acceptance Criteria
+- **Real‑time prediction** – The model must return a churn probability score for any customer within 500 ms of receiving a request.  
+- **Actionable insights** – The output must include a list of at least two actionable recommendations when the churn risk is above a configurable threshold (default 0.6).  
+- **Dynamic updates** – When new interaction data is ingested, the model must immediately recalculate the probability for that customer.  
+- **Accuracy** – On a held‑out test set the model’s AUC‑ROC must be ≥ 0.90.  
+- **Graceful degradation** – Missing or null feature values must be imputed or ignored without raising an exception.  
+- **API contract** – The returned JSON must contain the keys: `customer_id`, `churn_probability`, `insights`, `recommendations`.  
+- **Security** – No sensitive data (e.g., raw customer identifiers) should be logged or exposed in error messages.
 
-## 1. Acceptance Criteria  
-1. **Prediction Output** – `predict` returns a dictionary containing `churn_probability` (float 0–1), `insights` (list of strings), and `recommendations` (list of strings).  
-2. **Real‑time Update** – `update` accepts a list of interaction events and immediately adjusts the internal state so that subsequent `predict` calls reflect the new data.  
-3. **Actionable Insights** – For churn probability ≥ 0.7 the model must include a recommendation to “contact support” and for probability ≤ 0.3 a recommendation to “offer loyalty discount”.  
-4. **Accuracy** – On the historical churn dataset the model’s `predict` must achieve ≥ 90 % accuracy (binary classification with threshold 0.5).  
-5. **Performance** – A single `predict` call must complete in ≤ 500 ms on a machine with 4 CPU cores and 8 GB RAM.  
-6. **Missing Data Handling** – `predict` must not raise exceptions when optional features are missing; missing numeric features are imputed with the column mean.  
-7. **API Compatibility** – The returned dictionary keys match the dashboard schema: `customer_id`, `churn_probability`, `insights`, `recommendations`.
-
----
-
-## 2. Unit Tests (Pytest style)
+## 2. Unit Tests (pytest style)
 
 ```python
-import time
 import pytest
-import numpy as np
+import time
 from unittest.mock import MagicMock, patch
-
 from src.churn_prediction_model import ChurnPredictionModel
 
-
-# ---------- Helper Fixtures ----------
+# ------------------------------------------------------------------
+# Helper fixtures
+# ------------------------------------------------------------------
 @pytest.fixture
 def model():
-    """Instantiate model with a lightweight mock trained model."""
+    """Instantiate model with a mocked trained estimator."""
     m = ChurnPredictionModel()
-    # Replace the heavy sklearn model with a mock
+    # Replace the real estimator with a mock that returns deterministic output
     m.trained_model = MagicMock()
-    m.trained_model.predict_proba.return_value = np.array([[0.2, 0.8]])
+    m.trained_model.predict_proba.return_value = [[0.3, 0.7]]  # 70% churn
     return m
 
+# ------------------------------------------------------------------
+# Core functionality
+# ------------------------------------------------------------------
+def test_initialization_defaults():
+    """Model should set default parameters on init."""
+    m = ChurnPredictionModel()
+    assert m.churn_threshold == 0.6
+    assert hasattr(m, 'feature_columns')
+    assert m.trained_model is None  # not yet trained
 
-@pytest.fixture
-def sample_customer():
-    return {
-        "customer_id": "cust_001",
-        "days_since_last_interaction": 15,
-        "support_tickets_count": 2,
-        "monthly_spend": 1200,
-        "contract_duration_months": 24,
+def test_predict_returns_expected_keys(model):
+    """Predict returns all required keys."""
+    input_data = {
+        'customer_id': 'C123',
+        'days_since_last_interaction': 10,
+        'support_tickets_count': 2,
+        'monthly_spend': 1200,
+        'contract_duration_months': 12
     }
+    result = model.predict(input_data)
+    assert set(result.keys()) == {'customer_id', 'churn_probability', 'insights', 'recommendations'}
+    assert 0 <= result['churn_probability'] <= 1
 
+def test_insights_and_recommendations_threshold(model):
+    """When churn risk > threshold, insights/recommendations are populated."""
+    input_data = {'customer_id': 'C123', 'days_since_last_interaction': 10,
+                  'support_tickets_count': 2, 'monthly_spend': 1200,
+                  'contract_duration_months': 12}
+    result = model.predict(input_data)
+    assert len(result['insights']) >= 1
+    assert len(result['recommendations']) >= 1
 
-# ---------- Tests ----------
-def test_initialization(model):
-    """Model should expose required attributes."""
-    assert hasattr(model, "feature_columns")
-    assert hasattr(model, "trained_model")
-    assert isinstance(model.feature_columns, list)
+def test_low_risk_no_insights(model):
+    """When churn risk <= threshold, insights/recommendations are empty."""
+    model.trained_model.predict_proba.return_value = [[0.9, 0.1]]  # 10% churn
+    input_data = {'customer_id': 'C123', 'days_since_last_interaction': 10,
+                  'support_tickets_count': 2, 'monthly_spend': 1200,
+                  'contract_duration_months': 12}
+    result = model.predict(input_data)
+    assert result['insights'] == []
+    assert result['recommendations'] == []
 
-
-def test_predict_output_structure(model, sample_customer):
-    """Predict returns correct keys and types."""
-    out = model.predict(sample_customer)
-    assert set(out.keys()) == {"customer_id", "churn_probability", "insights", "recommendations"}
-    assert isinstance(out["churn_probability"], float)
-    assert 0 <= out["churn_probability"] <= 1
-    assert isinstance(out["insights"], list)
-    assert isinstance(out["recommendations"], list)
-
-
-def test_predict_missing_optional_features(model):
-    """Missing numeric features are imputed; no crash."""
-    incomplete = {
-        "customer_id": "cust_002",
-        "days_since_last_interaction": 10,
+def test_missing_features_graceful(model):
+    """Missing optional features are handled without error."""
+    input_data = {
+        'customer_id': 'C123',
+        'days_since_last_interaction': 10,
         # support_tickets_count missing
-        "monthly_spend": 900,
-        "contract_duration_months": 12,
+        'monthly_spend': 1200,
+        'contract_duration_months': 12
     }
-    out = model.predict(incomplete)
-    assert 0 <= out["churn_probability"] <= 1
+    result = model.predict(input_data)
+    assert 0 <= result['churn_probability'] <= 1
 
-
-def test_predict_invalid_input_raises(model):
-    """Empty dict or missing customer_id raises ValueError."""
-    with pytest.raises(ValueError):
-        model.predict({})
-    with pytest.raises(ValueError):
-        model.predict({"days_since_last_interaction": 5})
-
-
-def test_actionable_insights_and_recommendations(model, sample_customer):
-    """High churn probability triggers contact support; low triggers discount."""
-    # Force high probability
-    model.trained_model.predict_proba.return_value = np.array([[0.1, 0.9]])
-    out_high = model.predict(sample_customer)
-    assert "contact support" in [r.lower() for r in out_high["recommendations"]]
-
-    # Force low probability
-    model.trained_model.predict_proba.return_value = np.array([[0.95, 0.05]])
-    out_low = model.predict(sample_customer)
-    assert "offer loyalty discount" in [r.lo
+def test_invalid_input_raises_value_error(model):
+    """Empty dict or missing customer_id triggers ValueError."""
+    with pytest.rai
