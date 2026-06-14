@@ -1,12 +1,14 @@
-# Churn Prediction API
+# Customer Success Plans
 
-This project implements a simple churn prediction API using a trained machine learning model.
+This project demonstrates a basic customer success plans platform using Python.
 
-## Usage
+## Setup
 
-1. Train the model with customer usage data.
-2. Use the API to predict customer churn.
+1. Clone the repository
+2. Run `python -m pytest` to run the tests
+3. Run `python src/main.py` to run the application
 
-## API Endpoints
+## Endpoints
 
-* `GET /predict/<customer_id>`: Returns the predicted churn score for the given customer ID.
+* `predict_churn`: Predict the churn score of a customer
+* `generate_success_plan`: Generate a success plan for a customer
